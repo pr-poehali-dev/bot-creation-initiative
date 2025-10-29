@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 import Icon from '@/components/ui/icon';
+
+const API_URL = 'https://functions.poehali.dev/989b0978-28a1-4e74-b0d2-64a1f0dacdc6';
 
 interface User {
   id: number;
@@ -25,30 +28,84 @@ interface PendingRequest {
 }
 
 export default function AdminSection() {
-  const [users] = useState<User[]>([
-    { id: 1, name: 'Иван Петров', telegramId: '@ivan123', balance: 2500, referrals: 5, joined: '20.10.2025' },
-    { id: 2, name: 'Мария Сидорова', telegramId: '@maria_s', balance: 1500, referrals: 3, joined: '22.10.2025' },
-    { id: 3, name: 'Алексей Козлов', telegramId: '@alex_k', balance: 3000, referrals: 6, joined: '18.10.2025' },
-  ]);
+  const { toast } = useToast();
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    activeUsers: 0,
+    totalEarnings: 0,
+    pendingWithdrawals: 0,
+  });
+  const [loading, setLoading] = useState(true);
 
-  const [pendingRequests] = useState<PendingRequest[]>([
-    { id: 1, type: 'withdrawal', user: 'Иван Петров', amount: 1000, details: 'Карта 4276...', date: '29.10.2025' },
-    { id: 2, type: 'activation', user: 'Мария Сидорова', amount: 250, details: 'Чек загружен', date: '29.10.2025' },
-  ]);
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const stats = {
-    totalUsers: 127,
-    activeUsers: 89,
-    totalEarnings: 63500,
-    pendingWithdrawals: 12500,
+  const loadData = async () => {
+    try {
+      const [statsRes, usersRes, pendingRes] = await Promise.all([
+        fetch(`${API_URL}?action=stats`),
+        fetch(`${API_URL}?action=users`),
+        fetch(`${API_URL}?action=pending`),
+      ]);
+
+      const statsData = await statsRes.json();
+      const usersData = await usersRes.json();
+      const pendingData = await pendingRes.json();
+
+      setStats(statsData);
+      setUsers(usersData);
+      setPendingRequests(pendingData);
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось загрузить данные',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleApprove = (id: number) => {
-    console.log('Approved request:', id);
+  const handleApprove = async (request: PendingRequest) => {
+    try {
+      const response = await fetch(`${API_URL}?action=activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: request.id, adminId: 0 }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: 'Успешно!',
+          description: `Карта активирована для ${request.user}`,
+        });
+        loadData();
+      } else {
+        toast({
+          title: 'Ошибка',
+          description: result.error || 'Не удалось активировать',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Ошибка сети',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleReject = (id: number) => {
-    console.log('Rejected request:', id);
+    toast({
+      title: 'Отклонено',
+      description: 'Заявка отклонена',
+    });
   };
 
   return (
@@ -143,8 +200,9 @@ export default function AdminSection() {
                   <div className="flex gap-2">
                     <Button
                       size="sm"
-                      onClick={() => handleApprove(request.id)}
+                      onClick={() => handleApprove(request)}
                       className="bg-green-500 hover:bg-green-600"
+                      disabled={loading}
                     >
                       <Icon name="Check" size={16} />
                     </Button>
@@ -153,6 +211,7 @@ export default function AdminSection() {
                       variant="outline"
                       onClick={() => handleReject(request.id)}
                       className="border-red-500/30 text-red-500 hover:bg-red-500/10"
+                      disabled={loading}
                     >
                       <Icon name="X" size={16} />
                     </Button>
